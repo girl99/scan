@@ -1,0 +1,172 @@
+<html>
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <title>js唤起摄像头识别二维码</title>
+  <style>
+    #scan {
+      display: block;
+    }
+    #qr-canvas {
+      max-width: 300px;
+    }
+  </style>
+</head>
+
+<body>
+  <div><a href="/" target="_blank">本站首页</a></div>
+  <hr>
+  <div>兼容性只在手机中的chrome中测试通过，微信里面也能使用，但是canvas绘图很卡</div>
+  <div>原理：调用摄像头，将摄像头返回的媒体流渲染到视频标签中，再通过canvas绘制到画布上面，最后通过canvas分析二维码</div>
+  <hr>
+  <a href="javascript:;" id="scan">扫码</a>
+  <div id="output"></div>
+  <!-- 由于llqrcode.js中写死了id，所以id必须为qr-canvas -->
+  <canvas id="qr-canvas"></canvas>
+  <video id="video" muted autoplay width="300" height="200"></video>
+  <script src="https://cdn.bootcss.com/vConsole/3.2.0/vconsole.min.js"></script>
+  <script>
+    let vConsole = new VConsole();
+  </script>
+  <script type="text/javascript" src="js/qrcode.js"></script>
+  <script type="text/javascript">
+
+    const Scan = {
+      videoInputDevice: [],
+      videoElement: document.getElementById("video"),
+      canvasElement: document.getElementById("qr-canvas"),
+      decodeTimer: null,
+      canvasTimer: null,
+      canvasContext: document.getElementById("qr-canvas").getContext("2d"),
+      // 获取到的媒体设备
+      gotDevices (deviceInfos) {
+        let that = this;
+        for (let i = 0; i !== deviceInfos.length; ++i) {
+          let deviceInfo = deviceInfos[i];
+          if (deviceInfo.kind === 'audioinput') {
+            // 音频设备
+          } else if (deviceInfo.kind === 'videoinput') {
+            // 视频设备
+            that.videoInputDevice.push(deviceInfo);
+          } else {
+            // 其他设备
+            console.log('Found one other kind of source/device: ', deviceInfo);
+          }
+        }
+      },
+      getStream () {
+        let that = this;
+        if (window.stream) {
+          window.stream.getTracks().forEach((track) => {
+            track.stop();
+          });
+        }
+
+        let constraints = {
+          // 包含audio 可声明音频设备调用
+          // 声明视频设备调用
+          // video: true
+          video: {
+            deviceId: {
+              // [1].deviceId 表示后置摄像头,默认开启的是前置摄像头
+              exact: that.videoInputDevice[1].deviceId
+            }
+          }
+        };
+
+
+        /* // 微信里面此方法无效开启后置摄像头无效，必须使用 deviceId 开启
+        // 在chrome浏览器中可使用此方法开启后置摄像头
+        let front = false;
+        let constraints = {
+          video: {
+            // environment表示后置摄像头
+            // user表示前置摄像头
+            facingMode: (front? "user" : "environment")
+          }
+        }; */
+
+        // 视频设备初始化
+        navigator.mediaDevices.getUserMedia(constraints).then(that.gotStream.bind(that)).catch(that.handleError.bind(that));
+        that.captureToCanvas();
+        that.decode();
+      },
+
+      // 解码
+      decode () {
+        let that = this;
+        try {
+          qrcode.decode();
+        } catch (e) {
+          console.log(e);
+        };
+        that.decodeTimer = setTimeout(that.decode.bind(that), 1000); // 解码频率为1秒一次
+      },
+
+      //将视频流放到画布
+      captureToCanvas () {
+        let that = this;
+        try {
+          // 根据视频大小设置canvas大小
+          let w = that.videoElement.videoWidth;
+          let h = that.videoElement.videoHeight;
+          that.canvasElement.width = w;
+          that.canvasElement.height = h;
+          that.canvasContext.drawImage(that.videoElement, 0, 0, w, h);
+        } catch (e) {
+          console.log(e);
+        };
+        // 200毫秒绘制一次
+        that.canvasTimer = setTimeout(that.captureToCanvas.bind(that), 200);
+      },
+
+      handleError (error) {
+        console.log('Error: ', error);
+      },
+
+      gotStream (stream) {
+        let that = this;
+        window.stream = stream; // make stream available to console
+        that.videoElement.srcObject = stream;
+      },
+
+        init () {
+        let that = this;
+        // API参考
+        // https://developer.mozilla.org/zh-CN/docs/Web/API/MediaDevices/enumerateDevices
+        // 先获取设备列表，方便调用后置摄像头
+        let devices = navigator.mediaDevices.enumerateDevices().then(that.gotDevices.bind(that));
+        document.querySelector('#scan').addEventListener('click', () => {
+          document.getElementById('output').innerHTML = '';
+          that.videoElement.style.display = 'block';
+          that.canvasElement.style.display = 'block';
+
+          devices.then(that.getStream.bind(that)).catch(that.handleError.bind(that));
+
+          that.canvasContext.clearRect(0, 0, 300, 200);
+          //结果回调
+          qrcode.callback = (e) => {
+            // 清除画布，停止摄像头
+            clearTimeout(that.decodeTimer);
+            clearTimeout(that.canvasTimer);
+            that.canvasContext.clearRect(0, 0, 300, 200);
+            if (window.stream) {
+              window.stream.getTracks().forEach((track) => {
+                track.stop();
+              });
+            }
+            that.videoElement.style.display = 'none';
+            that.canvasElement.style.display = 'none';
+
+            document.getElementById('output').innerHTML = '结果：' + e;
+          }
+        });
+      }
+    };
+    Scan.init();
+  </script>
+</body>
+
+</html>
